@@ -17,6 +17,7 @@
 
 package org.pentaho.di.trans.steps.mongodbinput;
 
+import com.mongodb.AggregationOptions;
 import com.mongodb.Cursor;
 import com.mongodb.DBObject;
 import com.mongodb.ServerAddress;
@@ -177,7 +178,7 @@ public class MongoDbInput extends BaseStep implements StepInterface {
         logDetailed( BaseMessages.getString( PKG, "MongoDbInput.Message.QueryPulledDataFrom", query ) );
 
         List<DBObject> pipeline = MongodbInputDiscoverFieldsImpl.jsonPipelineToDBObjectList( query );
-        DBObject firstP = pipeline.get( 0 );
+        /*DBObject firstP = pipeline.get( 0 );
         DBObject[] remainder = null;
         if ( pipeline.size() > 1 ) {
           remainder = new DBObject[pipeline.size() - 1];
@@ -186,10 +187,11 @@ public class MongoDbInput extends BaseStep implements StepInterface {
           }
         } else {
           remainder = new DBObject[0];
-        }
+        }*/
 
         // Utilize MongoDB cursor class
-        Cursor cursor = data.collection.aggregate( firstP, remainder );
+        Cursor cursor = data.collection.aggregate(pipeline, AggregationOptions.builder().allowDiskUse(true).build());
+        //Cursor cursor = data.collection.aggregate( firstP, remainder );
         data.m_pipelineResult = cursor;
       } else {
         if ( meta.getExecuteForEachIncomingRow() && m_currentInputRowDrivingQuery != null ) {
