@@ -17,6 +17,9 @@
 
 package org.pentaho.mongo.wrapper.field;
 
+
+import com.google.common.base.Strings;
+import com.mongodb.AggregationOptions;
 import com.mongodb.AggregationOutput;
 import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
@@ -47,6 +50,7 @@ import org.pentaho.mongo.wrapper.MongoDBAction;
 import org.pentaho.mongo.wrapper.MongoWrapperUtil;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -58,6 +62,9 @@ import java.util.Map;
  * Created by bryan on 8/7/14.
  */
 public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverFields {
+  
+  public enum SupportedOptions { allowDiskUse, bypassDocumentValidation, cursor_batchSize }  
+    
   private static final Class<?> PKG = MongodbInputDiscoverFieldsImpl.class;
 
   public List<MongoField> discoverFields( final MongoProperties.Builder properties, final String db, final String collection,
@@ -461,8 +468,11 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     return result.results().iterator();
   }
 
-
   public static List<DBObject> jsonPipelineToDBObjectList( String jsonPipeline ) throws KettleException {
+    return jsonPipelineToDBObjectList(jsonPipeline, null);
+  }
+
+  public static List<DBObject> jsonPipelineToDBObjectList( String jsonPipeline, HashMap<SupportedOptions, Object> options ) throws KettleException {
     List<DBObject> pipeline = new ArrayList<DBObject>();
     StringBuilder b = new StringBuilder( jsonPipeline.trim() );
 
@@ -494,14 +504,28 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
         b.delete( 0, i + 1 );
         i = 0;
       }
+      if ( b.charAt( i ) == ']' ) {
+        // end of pipeline, following parts will be options
+        parts.add( "options" );
+      }
 
       i++;
     }
 
+    boolean isOption = false;
     for ( String p : parts ) {
       if ( !Const.isEmpty( p ) ) {
-        DBObject o = (DBObject) JSON.parse( p );
-        pipeline.add( o );
+        if ( "options".equals( parts ) ) {
+          isOption = true;
+          continue;
+        }
+        if ( isOption == false ) {
+          DBObject o = (DBObject) JSON.parse( p );
+          pipeline.add( o );
+        }
+        else if ( options != null ) {
+            parseAggregationOption(jsonPipeline, options);
+        }
       }
     }
 
@@ -511,5 +535,38 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     }
 
     return pipeline;
+  }
+  
+  private static void parseAggregationOption(String jsonPipelinePart, HashMap<SupportedOptions, Object> options) {
+      String[] optionParts = jsonPipelinePart.replace("[ {}\"]", "").split(":");
+      if ( optionParts.length < 2 ) {
+          return;
+      }
+
+      // parse option one value
+      if (optionParts.length == 2) {
+        SupportedOptions option = SupportedOptions.valueOf(optionParts[0]);
+        Object parsedOptionValue = null;
+        switch(option) {
+          case allowDiskUse:
+          case bypassDocumentValidation:
+              parsedOptionValue = Boolean.valueOf(optionParts[1]);
+        }
+        options.put(option, parsedOptionValue);
+        return;
+      }
+      
+      // parse option multiple values
+      for (int i = 1; i < optionParts.length; i = i+2) {
+        SupportedOptions option = SupportedOptions.valueOf(optionParts[0] + "_" + optionParts[i]);
+        String stringOptionValue = optionParts[i+1];
+        Object parsedOptionValue = null;
+        
+        switch(option) {
+          case cursor_batchSize:
+              parsedOptionValue = Integer.parseInt(stringOptionValue);
+        }
+        options.put(option, parsedOptionValue);
+      }
   }
 }
