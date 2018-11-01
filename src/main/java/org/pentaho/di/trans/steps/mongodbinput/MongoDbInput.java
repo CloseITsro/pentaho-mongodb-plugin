@@ -18,9 +18,13 @@
 package org.pentaho.di.trans.steps.mongodbinput;
 
 import com.mongodb.AggregationOutput;
+import com.mongodb.Cursor;
+import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.ServerAddress;
 import com.mongodb.util.JSON;
+import java.lang.reflect.Field;
+import java.util.HashMap;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.row.RowDataUtil;
@@ -36,8 +40,11 @@ import org.pentaho.di.trans.step.StepMetaInterface;
 import org.pentaho.mongo.MongoDbException;
 import org.pentaho.mongo.wrapper.MongoWrapperUtil;
 import org.pentaho.mongo.wrapper.field.MongodbInputDiscoverFieldsImpl;
+import org.pentaho.mongo.wrapper.field.MongodbInputDiscoverFieldsImpl.SupportedOptions;
 
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class MongoDbInput extends BaseStep implements StepInterface {
   private static Class<?> PKG = MongoDbInputMeta.class; // for i18n purposes,
@@ -176,20 +183,30 @@ public class MongoDbInput extends BaseStep implements StepInterface {
 
         logDetailed( BaseMessages.getString( PKG, "MongoDbInput.Message.QueryPulledDataFrom", query ) );
 
-        List<DBObject> pipeline = MongodbInputDiscoverFieldsImpl.jsonPipelineToDBObjectList( query );
-        DBObject firstP = pipeline.get( 0 );
-        DBObject[] remainder = null;
-        if ( pipeline.size() > 1 ) {
-          remainder = new DBObject[pipeline.size() - 1];
-          for ( int i = 1; i < pipeline.size(); i++ ) {
-            remainder[i - 1] = pipeline.get( i );
+        HashMap<SupportedOptions, Object> options = new HashMap<SupportedOptions, Object>();
+        List<DBObject> pipeline = MongodbInputDiscoverFieldsImpl.jsonPipelineToDBObjectList( query, options );
+        Cursor cursor = null;
+        
+          try {
+              Field f = data.collection.getClass().getDeclaredField("collection"); //NoSuchFieldException
+              f.setAccessible(true);
+              DBCollection collection = (DBCollection)f.get(data.collection);
+              // Utilize MongoDB cursor class     
+              cursor = collection.aggregate( pipeline, MongodbInputDiscoverFieldsImpl.buildAggregationOptions(options) );
+              
+          } catch (NoSuchFieldException ex) {
+              Logger.getLogger(MongoDbInput.class.getName()).log(Level.SEVERE, null, ex);
+          } catch (SecurityException ex) {
+              Logger.getLogger(MongoDbInput.class.getName()).log(Level.SEVERE, null, ex);
+          } catch (IllegalArgumentException ex) {
+              Logger.getLogger(MongoDbInput.class.getName()).log(Level.SEVERE, null, ex);
+          } catch (IllegalAccessException ex) {
+              Logger.getLogger(MongoDbInput.class.getName()).log(Level.SEVERE, null, ex);
           }
-        } else {
-          remainder = new DBObject[0];
-        }
 
-        AggregationOutput result = data.collection.aggregate( firstP, remainder );
-        data.m_pipelineResult = result.results().iterator();
+        //Cursor cursor = data.collection.aggregate( pipeline, MongodbInputDiscoverFieldsImpl.buildAggregationOptions(options) );
+        data.m_pipelineResult = cursor;
+
       } else {
         if ( meta.getExecuteForEachIncomingRow() && m_currentInputRowDrivingQuery != null ) {
           // do field value substitution

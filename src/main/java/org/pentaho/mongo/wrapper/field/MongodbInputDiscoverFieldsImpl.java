@@ -23,6 +23,7 @@ import com.mongodb.AggregationOptions;
 import com.mongodb.AggregationOutput;
 import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
+import com.mongodb.Cursor;
 import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBCursor;
@@ -57,6 +58,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import org.safehaus.uuid.Logger;
 
 /**
  * Created by bryan on 8/7/14.
@@ -455,17 +457,11 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     throws KettleException {
 
     query = query + ", {$limit : " + numDocsToSample + "}"; //$NON-NLS-1$ //$NON-NLS-2$
-    List<DBObject> samplePipe = jsonPipelineToDBObjectList( query );
 
-    DBObject first = samplePipe.get( 0 );
-    DBObject[] remainder = new DBObject[ samplePipe.size() - 1 ];
-    for ( int i = 1; i < samplePipe.size(); i++ ) {
-      remainder[ i - 1 ] = samplePipe.get( i );
-    }
-
-    AggregationOutput result = collection.aggregate( first, remainder );
-
-    return result.results().iterator();
+    HashMap<SupportedOptions, Object> options = new HashMap<SupportedOptions, Object>();
+    List<DBObject> samplePipe = jsonPipelineToDBObjectList( query, options );
+    Cursor cursor = collection.aggregate( samplePipe, buildAggregationOptions(options) );
+    return cursor;
   }
 
   public static List<DBObject> jsonPipelineToDBObjectList( String jsonPipeline ) throws KettleException {
@@ -511,7 +507,7 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
 
       i++;
     }
-
+    
     boolean isOption = false;
     for ( String p : parts ) {
       if ( !Const.isEmpty( p ) ) {
@@ -529,7 +525,7 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
       }
     }
 
-    if ( pipeline.size() == 0 ) {
+    if ( pipeline.isEmpty() ) {
       throw new KettleException( BaseMessages.getString( PKG,
         "MongoNoAuthWrapper.ErrorMessage.UnableToParsePipelineOperators" ) ); //$NON-NLS-1$
     }
@@ -537,15 +533,37 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     return pipeline;
   }
   
-  private static void parseAggregationOption(String jsonPipelinePart, HashMap<SupportedOptions, Object> options) {
+  public static AggregationOptions buildAggregationOptions(HashMap<SupportedOptions, Object> options) {
+      AggregationOptions.Builder aggregationOptionsBuilder = AggregationOptions.builder();
+        if (options.containsKey(SupportedOptions.allowDiskUse)) {
+          aggregationOptionsBuilder.allowDiskUse((Boolean)options.get(SupportedOptions.allowDiskUse));
+        }
+        if (options.containsKey(SupportedOptions.bypassDocumentValidation)) {
+          aggregationOptionsBuilder.bypassDocumentValidation((Boolean)options.get(SupportedOptions.bypassDocumentValidation));
+        }
+        if (options.containsKey(SupportedOptions.cursor_batchSize)) {
+          aggregationOptionsBuilder.batchSize((Integer)options.get(SupportedOptions.cursor_batchSize));
+        }
+        return aggregationOptionsBuilder.build();
+  }
+  
+  private static void parseAggregationOption(String jsonPipelinePart, HashMap<SupportedOptions, Object> options) throws KettleException{
       String[] optionParts = jsonPipelinePart.replace("[ {}\"]", "").split(":");
       if ( optionParts.length < 2 ) {
           return;
       }
 
-      // parse option one value
+      // parse option - one value
       if (optionParts.length == 2) {
-        SupportedOptions option = SupportedOptions.valueOf(optionParts[0]);
+        SupportedOptions option;
+        try {
+            Logger.logError("Options : " + optionParts[0].trim());
+          option = SupportedOptions.valueOf(optionParts[0].trim());
+        }
+        catch (IllegalArgumentException ex) {
+          throw new KettleException( BaseMessages.getString( PKG, "MongoDbInput.ErrorMessage.UnsupportedAggregationOption", optionParts[0] ) );  
+        }
+        
         Object parsedOptionValue = null;
         switch(option) {
           case allowDiskUse:
@@ -556,16 +574,28 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
         return;
       }
       
-      // parse option multiple values
+      // parse option - multiple values
       for (int i = 1; i < optionParts.length; i = i+2) {
-        SupportedOptions option = SupportedOptions.valueOf(optionParts[0] + "_" + optionParts[i]);
+        SupportedOptions option;
+        try {
+            option = SupportedOptions.valueOf(optionParts[0] + "_" + optionParts[i]);
+        } 
+        catch (IllegalArgumentException ex) {
+          throw new KettleException( BaseMessages.getString( PKG, "MongoDbInput.ErrorMessage.UnsupportedAggregationOption", optionParts[0] + "." + optionParts[i] ) );  
+        }
         String stringOptionValue = optionParts[i+1];
         Object parsedOptionValue = null;
         
-        switch(option) {
+        try {
+          switch(option) {
           case cursor_batchSize:
               parsedOptionValue = Integer.parseInt(stringOptionValue);
+          }
         }
+        catch (NumberFormatException ex) {
+          throw new KettleException( BaseMessages.getString( PKG, "MongoDbInput.ErrorMessage.UnparsableAggregationOptionValue", option.toString() ) );
+        }
+        
         options.put(option, parsedOptionValue);
       }
   }
