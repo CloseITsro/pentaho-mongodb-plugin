@@ -21,6 +21,7 @@ import com.mongodb.Cursor;
 import com.mongodb.DBObject;
 import com.mongodb.ServerAddress;
 import com.mongodb.util.JSON;
+import java.util.HashMap;
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.core.row.RowDataUtil;
@@ -36,6 +37,7 @@ import org.pentaho.di.trans.step.StepMetaInterface;
 import org.pentaho.mongo.MongoDbException;
 import org.pentaho.mongo.wrapper.MongoWrapperUtil;
 import org.pentaho.mongo.wrapper.field.MongodbInputDiscoverFieldsImpl;
+import org.pentaho.mongo.wrapper.field.MongodbInputDiscoverFieldsImpl.SupportedOptions;
 
 import java.util.List;
 
@@ -176,20 +178,11 @@ public class MongoDbInput extends BaseStep implements StepInterface {
 
         logDetailed( BaseMessages.getString( PKG, "MongoDbInput.Message.QueryPulledDataFrom", query ) );
 
-        List<DBObject> pipeline = MongodbInputDiscoverFieldsImpl.jsonPipelineToDBObjectList( query );
-        DBObject firstP = pipeline.get( 0 );
-        DBObject[] remainder = null;
-        if ( pipeline.size() > 1 ) {
-          remainder = new DBObject[pipeline.size() - 1];
-          for ( int i = 1; i < pipeline.size(); i++ ) {
-            remainder[i - 1] = pipeline.get( i );
-          }
-        } else {
-          remainder = new DBObject[0];
-        }
-
-        // Utilize MongoDB cursor class
-        Cursor cursor = data.collection.aggregate( firstP, remainder );
+        HashMap<SupportedOptions, Object> options = new HashMap<SupportedOptions, Object>();
+        List<DBObject> pipeline = MongodbInputDiscoverFieldsImpl.jsonPipelineToDBObjectList( query, options );
+        
+        // Utilize MongoDB cursor class                
+        Cursor cursor = data.collection.aggregate( pipeline, MongodbInputDiscoverFieldsImpl.buildAggregationOptions(options) );
         data.m_pipelineResult = cursor;
       } else {
         if ( meta.getExecuteForEachIncomingRow() && m_currentInputRowDrivingQuery != null ) {
