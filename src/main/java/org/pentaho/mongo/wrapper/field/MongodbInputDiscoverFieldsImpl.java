@@ -17,10 +17,7 @@
 
 package org.pentaho.mongo.wrapper.field;
 
-
-import com.google.common.base.Strings;
 import com.mongodb.AggregationOptions;
-import com.mongodb.AggregationOutput;
 import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
 import com.mongodb.Cursor;
@@ -51,9 +48,9 @@ import org.pentaho.mongo.wrapper.MongoDBAction;
 import org.pentaho.mongo.wrapper.MongoWrapperUtil;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -65,7 +62,8 @@ import org.safehaus.uuid.Logger;
  */
 public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverFields {
   
-  public enum SupportedOptions { allowDiskUse, bypassDocumentValidation, cursor_batchSize }  
+  public enum SupportedAggregationOptions { allowDiskUse, bypassDocumentValidation, cursor, batchSize }
+  public static final EnumSet<SupportedAggregationOptions> TOP_AGGREGATION_OPTIONS = EnumSet.of(SupportedAggregationOptions.allowDiskUse, SupportedAggregationOptions.bypassDocumentValidation, SupportedAggregationOptions.cursor);
     
   private static final Class<?> PKG = MongodbInputDiscoverFieldsImpl.class;
 
@@ -458,7 +456,7 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
 
     query = query + ", {$limit : " + numDocsToSample + "}"; //$NON-NLS-1$ //$NON-NLS-2$
 
-    HashMap<SupportedOptions, Object> options = new HashMap<SupportedOptions, Object>();
+    HashMap<SupportedAggregationOptions, Object> options = new HashMap<SupportedAggregationOptions, Object>();
     List<DBObject> samplePipe = jsonPipelineToDBObjectList( query, options );
     Cursor cursor = collection.aggregate( samplePipe, buildAggregationOptions(options) );
     return cursor;
@@ -468,7 +466,7 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     return jsonPipelineToDBObjectList(jsonPipeline, null);
   }
 
-  public static List<DBObject> jsonPipelineToDBObjectList( String jsonPipeline, HashMap<SupportedOptions, Object> options ) throws KettleException {
+  public static List<DBObject> jsonPipelineToDBObjectList( String jsonPipeline, HashMap<SupportedAggregationOptions, Object> options ) throws KettleException {
     List<DBObject> pipeline = new ArrayList<DBObject>();
     StringBuilder b = new StringBuilder( jsonPipeline.trim() );
 
@@ -511,7 +509,7 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     boolean isOption = false;
     for ( String p : parts ) {
       if ( !Const.isEmpty( p ) ) {
-        if ( "options".equals( parts ) ) {
+        if ( "options".equals( p ) ) {
           isOption = true;
           continue;
         }
@@ -520,7 +518,7 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
           pipeline.add( o );
         }
         else if ( options != null ) {
-            parseAggregationOption(jsonPipeline, options);
+            parseAggregationOption(p, options);
         }
       }
     }
@@ -533,70 +531,38 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     return pipeline;
   }
   
-  public static AggregationOptions buildAggregationOptions(HashMap<SupportedOptions, Object> options) {
+  public static AggregationOptions buildAggregationOptions(HashMap<SupportedAggregationOptions, Object> options) {
       AggregationOptions.Builder aggregationOptionsBuilder = AggregationOptions.builder();
-        if (options.containsKey(SupportedOptions.allowDiskUse)) {
-          aggregationOptionsBuilder.allowDiskUse((Boolean)options.get(SupportedOptions.allowDiskUse));
+        if (options.containsKey(SupportedAggregationOptions.allowDiskUse)) {
+          aggregationOptionsBuilder.allowDiskUse((Boolean)options.get(SupportedAggregationOptions.allowDiskUse));
         }
-        if (options.containsKey(SupportedOptions.bypassDocumentValidation)) {
-          aggregationOptionsBuilder.bypassDocumentValidation((Boolean)options.get(SupportedOptions.bypassDocumentValidation));
+        if (options.containsKey(SupportedAggregationOptions.bypassDocumentValidation)) {
+          aggregationOptionsBuilder.bypassDocumentValidation((Boolean)options.get(SupportedAggregationOptions.bypassDocumentValidation));
         }
-        if (options.containsKey(SupportedOptions.cursor_batchSize)) {
-          aggregationOptionsBuilder.batchSize((Integer)options.get(SupportedOptions.cursor_batchSize));
+        if (options.containsKey(SupportedAggregationOptions.batchSize)) {
+          aggregationOptionsBuilder.batchSize((Integer)options.get(SupportedAggregationOptions.batchSize));
         }
         return aggregationOptionsBuilder.build();
   }
   
-  private static void parseAggregationOption(String jsonPipelinePart, HashMap<SupportedOptions, Object> options) throws KettleException{
-      String[] optionParts = jsonPipelinePart.replace("[ {}\"]", "").split(":");
-      if ( optionParts.length < 2 ) {
-          return;
-      }
-
-      // parse option - one value
-      if (optionParts.length == 2) {
-        SupportedOptions option;
-        try {
-            Logger.logError("Options : " + optionParts[0].trim());
-          option = SupportedOptions.valueOf(optionParts[0].trim());
-        }
-        catch (IllegalArgumentException ex) {
-          throw new KettleException( BaseMessages.getString( PKG, "MongoDbInput.ErrorMessage.UnsupportedAggregationOption", optionParts[0] ) );  
-        }
-        
-        Object parsedOptionValue = null;
-        switch(option) {
-          case allowDiskUse:
-          case bypassDocumentValidation:
-              parsedOptionValue = Boolean.valueOf(optionParts[1]);
-        }
-        options.put(option, parsedOptionValue);
-        return;
-      }
+  private static void parseAggregationOption(String jsonPipelinePart, HashMap<SupportedAggregationOptions, Object> options) throws KettleException{
+      DBObject optionsObject = (DBObject)JSON.parse(jsonPipelinePart);
       
-      // parse option - multiple values
-      for (int i = 1; i < optionParts.length; i = i+2) {
-        SupportedOptions option;
-        try {
-            option = SupportedOptions.valueOf(optionParts[0] + "_" + optionParts[i]);
-        } 
-        catch (IllegalArgumentException ex) {
-          throw new KettleException( BaseMessages.getString( PKG, "MongoDbInput.ErrorMessage.UnsupportedAggregationOption", optionParts[0] + "." + optionParts[i] ) );  
-        }
-        String stringOptionValue = optionParts[i+1];
-        Object parsedOptionValue = null;
-        
-        try {
-          switch(option) {
-          case cursor_batchSize:
-              parsedOptionValue = Integer.parseInt(stringOptionValue);
+      for (SupportedAggregationOptions supportedOption : TOP_AGGREGATION_OPTIONS) {
+          if (optionsObject.containsField(supportedOption.toString())) {
+              switch(supportedOption) {
+                  case allowDiskUse:
+                  case bypassDocumentValidation:
+                      options.put(supportedOption, optionsObject.get(supportedOption.toString()));
+                      break;
+                  case cursor:
+                      DBObject cursor = (DBObject) optionsObject.get(supportedOption.toString());
+                      if (cursor.containsField(SupportedAggregationOptions.batchSize.toString())) {
+                          options.put(SupportedAggregationOptions.batchSize, cursor.get(SupportedAggregationOptions.batchSize.toString()));
+                      }
+                      break;
+              }
           }
-        }
-        catch (NumberFormatException ex) {
-          throw new KettleException( BaseMessages.getString( PKG, "MongoDbInput.ErrorMessage.UnparsableAggregationOptionValue", option.toString() ) );
-        }
-        
-        options.put(option, parsedOptionValue);
       }
   }
 }

@@ -40,7 +40,7 @@ import org.pentaho.di.trans.step.StepMetaInterface;
 import org.pentaho.mongo.MongoDbException;
 import org.pentaho.mongo.wrapper.MongoWrapperUtil;
 import org.pentaho.mongo.wrapper.field.MongodbInputDiscoverFieldsImpl;
-import org.pentaho.mongo.wrapper.field.MongodbInputDiscoverFieldsImpl.SupportedOptions;
+import org.pentaho.mongo.wrapper.field.MongodbInputDiscoverFieldsImpl.SupportedAggregationOptions;
 
 import java.util.List;
 import java.util.logging.Level;
@@ -183,7 +183,7 @@ public class MongoDbInput extends BaseStep implements StepInterface {
 
         logDetailed( BaseMessages.getString( PKG, "MongoDbInput.Message.QueryPulledDataFrom", query ) );
 
-        HashMap<SupportedOptions, Object> options = new HashMap<SupportedOptions, Object>();
+        HashMap<SupportedAggregationOptions, Object> options = new HashMap<SupportedAggregationOptions, Object>();
         List<DBObject> pipeline = MongodbInputDiscoverFieldsImpl.jsonPipelineToDBObjectList( query, options );
         Cursor cursor = null;
         
