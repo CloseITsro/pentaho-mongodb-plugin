@@ -466,70 +466,78 @@ public class MongodbInputDiscoverFieldsImpl implements MongoDbInputDiscoverField
     return jsonPipelineToDBObjectList(jsonPipeline, null);
   }
 
-  public static List<DBObject> jsonPipelineToDBObjectList( String jsonPipeline, HashMap<SupportedAggregationOptions, Object> options ) throws KettleException {
-    List<DBObject> pipeline = new ArrayList<DBObject>();
-    StringBuilder b = new StringBuilder( jsonPipeline.trim() );
+    public static List<DBObject> jsonPipelineToDBObjectList(String jsonPipeline, HashMap<SupportedAggregationOptions, Object> options) throws KettleException {
+        List<DBObject> pipeline = new ArrayList<DBObject>();
+        StringBuilder b = new StringBuilder(jsonPipeline.trim());
 
-    // extract the parts of the pipeline
-    int bracketCount = -1;
-    List<String> parts = new ArrayList<String>();
-    int i = 0;
-    while ( i < b.length() ) {
-      if ( b.charAt( i ) == '{' ) {
-        if ( bracketCount == -1 ) {
-          // trim anything off before this point
-          b.delete( 0, i );
-          bracketCount = 0;
-          i = 0;
+        // extract the parts of the pipeline
+        int bracketCount = -1;
+        int squareBracketCount = -1;
+        List<String> parts = new ArrayList<String>();
+        int i = 0;
+        while (i < b.length()) {
+            if (b.charAt(i) == '[' && bracketCount <= 0) { // open only if outside stages
+                if (squareBracketCount == -1) {
+                    squareBracketCount = 0;
+                }
+                squareBracketCount++;
+            } else if (b.charAt(i) == '{') {
+                if (bracketCount == -1) {
+                    // trim anything off before this point
+                    b.delete(0, i);
+                    bracketCount = 0;
+                    i = 0;
+                }
+                bracketCount++;
+            } else if (b.charAt(i) == '}') {
+                bracketCount--;
+            } else if (b.charAt(i) == ']' && bracketCount <= 0) {
+                squareBracketCount--;
+            }
+
+            if (squareBracketCount == 0) {
+                squareBracketCount = -1;
+                // end of pipeline, following parts will be options
+                parts.add("options");
+            }
+            if (bracketCount == 0) {
+                String part = b.substring(0, i + 1);
+                parts.add(part);
+                bracketCount = -1;
+
+                if (i == b.length() - 1) {
+                    break;
+                }
+                b.delete(0, i + 1);
+                i = 0;
+            }
+            
+            i++;
         }
-        bracketCount++;
-      }
-      if ( b.charAt( i ) == '}' ) {
-        bracketCount--;
-      }
-      if ( bracketCount == 0 ) {
-        String part = b.substring( 0, i + 1 );
-        parts.add( part );
-        bracketCount = -1;
 
-        if ( i == b.length() - 1 ) {
-          break;
+        boolean isOption = false;
+        for (String p : parts) {
+            if (!Const.isEmpty(p)) {
+                if ("options".equals(p)) {
+                    isOption = true;
+                    continue;
+                }
+                if (isOption == false) {
+                    DBObject o = (DBObject) JSON.parse(p);
+                    pipeline.add(o);
+                } else if (options != null) {
+                    parseAggregationOption(p, options);
+                }
+            }
         }
-        b.delete( 0, i + 1 );
-        i = 0;
-      }
-      if ( b.charAt( i ) == ']' ) {
-        // end of pipeline, following parts will be options
-        parts.add( "options" );
-      }
 
-      i++;
+        if (pipeline.isEmpty()) {
+            throw new KettleException(BaseMessages.getString(PKG,
+                    "MongoNoAuthWrapper.ErrorMessage.UnableToParsePipelineOperators")); //$NON-NLS-1$
+        }
+
+        return pipeline;
     }
-    
-    boolean isOption = false;
-    for ( String p : parts ) {
-      if ( !Const.isEmpty( p ) ) {
-        if ( "options".equals( p ) ) {
-          isOption = true;
-          continue;
-        }
-        if ( isOption == false ) {
-          DBObject o = (DBObject) JSON.parse( p );
-          pipeline.add( o );
-        }
-        else if ( options != null ) {
-            parseAggregationOption(p, options);
-        }
-      }
-    }
-
-    if ( pipeline.isEmpty() ) {
-      throw new KettleException( BaseMessages.getString( PKG,
-        "MongoNoAuthWrapper.ErrorMessage.UnableToParsePipelineOperators" ) ); //$NON-NLS-1$
-    }
-
-    return pipeline;
-  }
   
   public static AggregationOptions buildAggregationOptions(HashMap<SupportedAggregationOptions, Object> options) {
       AggregationOptions.Builder aggregationOptionsBuilder = AggregationOptions.builder();
